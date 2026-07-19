@@ -1,7 +1,13 @@
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
+
+  // 路径转换：Anthropic 格式 → OpenRouter 格式
+  if (url.pathname.startsWith("/v1/")) {
+    url.pathname = "/api" + url.pathname;
+  }
+
   url.hostname = "openrouter.ai";
-  
+
   const headers = new Headers(req.headers);
   const apiKey = headers.get("x-api-key");
   if (apiKey) {
@@ -9,7 +15,7 @@ Deno.serve(async (req: Request) => {
     headers.set("Authorization", `Bearer ${apiKey}`);
   }
   headers.delete("anthropic-version");
-  
+
   return fetch(url.toString(), {
     method: req.method,
     headers,
