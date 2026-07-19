@@ -16,7 +16,7 @@ Deno.serve(async (req: Request) => {
   }
   headers.delete("anthropic-version");
 
-  // —— 关键改动:处理请求体,剥掉历史里的思考块 ——
+  // 请求侧:剥掉历史里的思考块(避免回传报错)
   let outBody: BodyInit | null = req.body;
   if (req.method === "POST") {
     try {
@@ -31,9 +31,9 @@ Deno.serve(async (req: Request) => {
         }
       }
       outBody = JSON.stringify(reqData);
-      headers.delete("content-length"); // body 长度变了,让 fetch 重算
+      headers.delete("content-length");
     } catch {
-      outBody = req.body; // 解析失败就原样转发
+      outBody = req.body;
     }
   }
 
@@ -50,15 +50,53 @@ Deno.serve(async (req: Request) => {
   const contentType = resp.headers.get("content-type") || "";
 
   if (contentType.includes("text/event-stream")) {
+    // 流式:剔除 redacted_thinking 块(它是 thinking 的冗余副本)
     const body = await resp.text();
-    const fixed = body.replace(/"model":"[^/]+\/(claude-[^"]+)"/g, '"model":"$1"');
-    return new Response(fixed, { status: resp.status, headers: resp.headers });
+    const events = body.split("\n\n");
+    const redactedIdx = new Set<number>();
+    const out: string[] = [];
+
+    for (const ev of events) {
+      const dataLine = ev.split("\n").find((l) => l.startsWith("data: "));
+      if (!dataLine) { out.push(ev); continue; }
+      const raw = dataLine.slice(6);
+      let data: any;
+      try { data = JSON.parse(raw); } catch { out.push(ev); continue; }
+
+      // 记录 redacted_thinking 的 index,并丢弃它的 start 事件
+      if (data.type === "content_block_start" && data.content_block?.type === "redacted_thinking") {
+        redactedIdx.add(data.index);
+        continue;
+      }
+      // 丢弃该 index 的 delta / stop
+      if ((data.type === "content_block_delta" || data.type === "content_block_stop")
+          && redactedIdx.has(data.index)) {
+        continue;
+      }
+
+      // 修 model 名
+      if (typeof data.model === "string" && data.model.includes("/")) {
+        data.model = data.model.replace(/^[^/]+\//, "");
+      }
+      if (data.message && typeof data.message.model === "string" && data.message.model.includes("/")) {
+        data.message.model = data.message.model.replace(/^[^/]+\//, "");
+      }
+
+      const eventLine = ev.split("\n").find((l) => l.startsWith("event: "));
+      out.push((eventLine ? eventLine + "\n" : "") + "data: " + JSON.stringify(data));
+    }
+
+    return new Response(out.join("\n\n"), { status: resp.status, headers: resp.headers });
   } else {
+    // 非流式:从 content 数组里剔除 redacted_thinking
     const body = await resp.text();
     try {
       const data = JSON.parse(body);
-      if (data.model && data.model.includes("/")) {
+      if (typeof data.model === "string" && data.model.includes("/")) {
         data.model = data.model.replace(/^[^/]+\//, "");
+      }
+      if (Array.isArray(data.content)) {
+        data.content = data.content.filter((b: any) => b?.type !== "redacted_thinking");
       }
       return new Response(JSON.stringify(data), { status: resp.status, headers: resp.headers });
     } catch {
