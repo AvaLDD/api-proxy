@@ -1,18 +1,19 @@
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
 
-  console.log(">>> INCOMING:", req.method, url.pathname);
-  
   if (url.pathname.startsWith("/v1/")) {
     url.pathname = "/api" + url.pathname;
   }
   url.hostname = "openrouter.ai";
 
   const headers = new Headers(req.headers);
+
   const apiKey = headers.get("x-api-key");
   if (apiKey) {
     headers.delete("x-api-key");
     headers.set("Authorization", `Bearer ${apiKey}`);
+  } else {
+    headers.set("Authorization", `Bearer ${Deno.env.get("OPENROUTER_API_KEY")}`);
   }
   headers.delete("anthropic-version");
 
@@ -21,8 +22,6 @@ Deno.serve(async (req: Request) => {
     headers,
     body: req.body,
   });
-
-  console.log("<<< RESPONSE:", resp.status, resp.headers.get("content-type")?.substring(0, 30));
 
   const contentType = resp.headers.get("content-type") || "";
 
@@ -38,7 +37,6 @@ Deno.serve(async (req: Request) => {
     });
   } else {
     const body = await resp.text();
-    console.log("<<< BODY:", body.substring(0, 500));
     try {
       const data = JSON.parse(body);
       if (data.model && data.model.includes("/")) {
