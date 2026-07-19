@@ -23,6 +23,14 @@ Deno.serve(async (req: Request) => {
     body: req.body,
   });
 
+  // 空 body 直接返回
+  if (resp.status === 204 || resp.status === 304 || !resp.body) {
+    return new Response(null, {
+      status: resp.status,
+      headers: resp.headers,
+    });
+  }
+
   const contentType = resp.headers.get("content-type") || "";
 
   if (contentType.includes("text/event-stream")) {
