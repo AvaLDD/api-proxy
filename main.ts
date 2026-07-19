@@ -1,6 +1,8 @@
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
 
+  console.log(">>> INCOMING:", req.method, url.pathname);
+  
   if (url.pathname.startsWith("/v1/")) {
     url.pathname = "/api" + url.pathname;
   }
@@ -20,11 +22,12 @@ Deno.serve(async (req: Request) => {
     body: req.body,
   });
 
+  console.log("<<< RESPONSE:", resp.status, resp.headers.get("content-type")?.substring(0, 30));
+
   const contentType = resp.headers.get("content-type") || "";
 
   if (contentType.includes("text/event-stream")) {
     const body = await resp.text();
-    // 替换所有 SSE 事件中的 provider 前缀 model 名
     const fixed = body.replace(
       /"model":"[^/]+\/(claude-[^"]+)"/g,
       '"model":"$1"'
@@ -35,6 +38,7 @@ Deno.serve(async (req: Request) => {
     });
   } else {
     const body = await resp.text();
+    console.log("<<< BODY:", body.substring(0, 500));
     try {
       const data = JSON.parse(body);
       if (data.model && data.model.includes("/")) {
